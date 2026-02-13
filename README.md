@@ -3,8 +3,14 @@
 > This Gradio-based web application leverages the **Qwen3-VL-4B-Instruct** model from Alibaba's Qwen series for multimodal tasks involving images and text. It enables users to upload an image and perform various vision-language tasks, such as querying details, generating captions, detecting points of interest, or identifying bounding boxes for objects. The app includes visual annotations for point and detection tasks using the `supervision` library.
 Powered by Hugging Face Transformers, PyTorch, and Gradio, this demo showcases the model's capabilities in real-time image understanding.
 
+> [!note]
+HF Demo: https://huggingface.co/spaces/prithivMLmods/Qwen3-VL-HF-Demo
+
 <img width="1918" height="1223" alt="Screenshot 2025-11-18 at 17-20-08 Qwen3 VL HF Demo - a Hugging Face Space by prithivMLmods" src="https://github.com/user-attachments/assets/14e0b157-3dec-410e-8fc6-4161210ab1e9" />
 <img width="1918" height="1127" alt="Screenshot 2025-11-18 at 17-04-03 Qwen3 VL HF Demo - a Hugging Face Space by prithivMLmods" src="https://github.com/user-attachments/assets/076a518a-25a0-4e8a-bc0b-746a34a6b936" />
+
+> [!important] 
+note: remove kernels and flash_attn3 implementation if you are using it on *non-hopper* architecture gpus.
 
 ## Features
 
@@ -44,13 +50,29 @@ pip install gradio==5.49.1
 
 For a full list, see `requirements.txt`:
 ```
-transformers==4.57.0
-torchvision==0.23.0
-supervision==0.26.1
-accelerate==1.10.1
-Pillow==11.3.0
-gradio==5.49.1
+git+https://github.com/huggingface/transformers.git@v4.57.6
+git+https://github.com/huggingface/accelerate.git
+git+https://github.com/huggingface/peft.git
+transformers-stream-generator
+huggingface_hub
+qwen-vl-utils
+sentencepiece
+opencv-python
 torch==2.8.0
+torchvision
+supervision
+matplotlib
+pdf2image
+requests
+pymupdf
+kernels
+hf_xet
+spaces
+pillow
+gradio # - gradio@6.3.0
+fpdf
+timm
+av
 ```
 
 ### Setup
