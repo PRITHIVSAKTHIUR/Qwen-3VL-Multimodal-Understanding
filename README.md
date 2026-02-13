@@ -39,15 +39,6 @@ Try the live demo on Hugging Face Spaces:
 ### Requirements
 Install the dependencies using the provided `requirements.txt` or run the following:
 
-```bash
-pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu121  # For CUDA 12.1; adjust for your setup
-pip install transformers==4.57.0
-pip install supervision==0.26.1
-pip install accelerate==1.10.1
-pip install Pillow==11.3.0
-pip install gradio==5.49.1
-```
-
 For a full list, see `requirements.txt`:
 ```
 git+https://github.com/huggingface/transformers.git@v4.57.6
