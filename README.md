@@ -25,11 +25,6 @@ note: remove kernels and flash_attn3 implementation if you are using it on *non-
 
 The app processes images at a thumbnail resolution (512x512) for efficiency and supports JSON-formatted outputs for structured tasks.
 
-## Demo
-
-Try the live demo on Hugging Face Spaces:  
-[https://huggingface.co/spaces/prithivMLmods/Qwen3-VL-HF-Demo](https://huggingface.co/spaces/prithivMLmods/Qwen3-VL-HF-Demo)
-
 ## Installation
 
 ### Prerequisites
