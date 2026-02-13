@@ -12,6 +12,7 @@ from gradio.themes.utils import colors, fonts, sizes
 import json
 import ast
 import re
+import uuid
 from PIL import Image
 from spaces import GPU
 
@@ -83,15 +84,133 @@ class SteelBlueTheme(Soft):
 
 steel_blue_theme = SteelBlueTheme()
 
+css = """
+#main-title h1 {
+    font-size: 2.3em !important;
+}
+#output-title h2 {
+    font-size: 2.2em !important;
+}
+
+/* RadioAnimated Styles */
+.ra-wrap{ width: fit-content; }
+.ra-inner{
+  position: relative; display: inline-flex; align-items: center; gap: 0; padding: 6px;
+  background: var(--neutral-200); border-radius: 9999px; overflow: hidden;
+}
+.ra-input{ display: none; }
+.ra-label{
+  position: relative; z-index: 2; padding: 8px 16px;
+  font-family: inherit; font-size: 14px; font-weight: 600;
+  color: var(--neutral-500); cursor: pointer; transition: color 0.2s; white-space: nowrap;
+}
+.ra-highlight{
+  position: absolute; z-index: 1; top: 6px; left: 6px;
+  height: calc(100% - 12px); border-radius: 9999px;
+  background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: transform 0.2s, width 0.2s;
+}
+.ra-input:checked + .ra-label{ color: black; }
+
+/* Dark mode adjustments for Radio */
+.dark .ra-inner { background: var(--neutral-800); }
+.dark .ra-label { color: var(--neutral-400); }
+.dark .ra-highlight { background: var(--neutral-600); }
+.dark .ra-input:checked + .ra-label { color: white; }
+
+#gpu-duration-container {
+    padding: 10px;
+    border-radius: 8px;
+    background: var(--background-fill-secondary);
+    border: 1px solid var(--border-color-primary);
+    margin-top: 10px;
+}
+"""
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = "auto"
 
 CATEGORIES = ["Query", "Caption", "Point", "Detect"]
 
+class RadioAnimated(gr.HTML):
+    def __init__(self, choices, value=None, **kwargs):
+        if not choices or len(choices) < 2:
+            raise ValueError("RadioAnimated requires at least 2 choices.")
+        if value is None:
+            value = choices[0]
+
+        uid = uuid.uuid4().hex[:8]
+        group_name = f"ra-{uid}"
+
+        inputs_html = "\n".join(
+            f"""
+            <input class="ra-input" type="radio" name="{group_name}" id="{group_name}-{i}" value="{c}">
+            <label class="ra-label" for="{group_name}-{i}">{c}</label>
+            """
+            for i, c in enumerate(choices)
+        )
+
+        html_template = f"""
+        <div class="ra-wrap" data-ra="{uid}">
+          <div class="ra-inner">
+            <div class="ra-highlight"></div>
+            {inputs_html}
+          </div>
+        </div>
+        """
+
+        js_on_load = r"""
+        (() => {
+          const wrap = element.querySelector('.ra-wrap');
+          const inner = element.querySelector('.ra-inner');
+          const highlight = element.querySelector('.ra-highlight');
+          const inputs = Array.from(element.querySelectorAll('.ra-input'));
+
+          if (!inputs.length) return;
+
+          const choices = inputs.map(i => i.value);
+
+          function setHighlightByIndex(idx) {
+            const n = choices.length;
+            const pct = 100 / n;
+            highlight.style.width = `calc(${pct}% - 6px)`;
+            highlight.style.transform = `translateX(${idx * 100}%)`;
+          }
+
+          function setCheckedByValue(val, shouldTrigger=false) {
+            const idx = Math.max(0, choices.indexOf(val));
+            inputs.forEach((inp, i) => { inp.checked = (i === idx); });
+            setHighlightByIndex(idx);
+
+            props.value = choices[idx];
+            if (shouldTrigger) trigger('change', props.value);
+          }
+
+          setCheckedByValue(props.value ?? choices[0], false);
+
+          inputs.forEach((inp) => {
+            inp.addEventListener('change', () => {
+              setCheckedByValue(inp.value, true);
+            });
+          });
+        })();
+        """
+
+        super().__init__(
+            value=value,
+            html_template=html_template,
+            js_on_load=js_on_load,
+            **kwargs
+        )
+
+def apply_gpu_duration(val: str):
+    return int(val)
+
 qwen_model = Qwen3VLForConditionalGeneration.from_pretrained(
     "Qwen/Qwen3-VL-4B-Instruct",
     dtype=DTYPE,
     device_map=DEVICE,
+    attn_implementation="kernels-community/flash-attn3",
 ).eval()
 qwen_processor = Qwen3VLProcessor.from_pretrained(
     "Qwen/Qwen3-VL-4B-Instruct",
@@ -116,7 +235,6 @@ def annotate_image(image: Image.Image, result: dict):
     if not isinstance(image, Image.Image) or not isinstance(result, dict):
         return image
 
-    # Ensure image is mutable
     image = image.convert("RGB")
     original_width, original_height = image.size
 
@@ -192,8 +310,16 @@ def run_qwen_inference(image: Image.Image, prompt: str):
     )[0]
 
 
-@GPU
-def process_qwen(image: Image.Image, category: str, prompt: str):
+def calc_timeout_process(image: Image.Image, category: str, prompt: str, gpu_timeout: int):
+    """Calculate GPU timeout duration for processing."""
+    try:
+        return int(gpu_timeout)
+    except:
+        return 60
+
+
+@GPU(duration=calc_timeout_process)
+def process_qwen(image: Image.Image, category: str, prompt: str, gpu_timeout: int = 60):
     if category == "Query":
         return run_qwen_inference(image, prompt), {}
     elif category == "Caption":
@@ -234,7 +360,7 @@ def process_qwen(image: Image.Image, category: str, prompt: str):
         return json.dumps(objects_result, indent=2), objects_result
     return "Invalid category", {}
 
-def process_inputs(image, category, prompt):
+def process_inputs(image, category, prompt, gpu_timeout):
     if image is None:
         raise gr.Error("Please upload an image.")
     if not prompt:
@@ -242,7 +368,7 @@ def process_inputs(image, category, prompt):
 
     image.thumbnail((512, 512))
 
-    qwen_text, qwen_data = process_qwen(image, category, prompt)
+    qwen_text, qwen_data = process_qwen(image, category, prompt, gpu_timeout)
     qwen_annotated_image = annotate_image(image.copy(), qwen_data)
 
     return qwen_annotated_image, qwen_text
@@ -259,41 +385,45 @@ def on_category_change(category: str):
     return gr.Textbox(placeholder="e.g., detect the object.")
 
 
-css = """
-#main-title h1 {
-    font-size: 2.3em !important;
-}
-#output-title h2 {
-    font-size: 2.1em !important;
-}
-"""
-
-with gr.Blocks(css=css, theme=steel_blue_theme) as demo:
+with gr.Blocks() as demo:
     with gr.Column(elem_id="col-container"):
         gr.Markdown("# **Qwen-3VL: Multimodal Understanding**", elem_id="main-title")
 
         with gr.Row():
-            with gr.Column(scale=1):
-                image_input = gr.Image(type="pil", label="Upload Image")
-                category_select = gr.Radio(
+            with gr.Column():
+                image_input = gr.Image(type="pil", label="Upload Image", height=350)
+                category_select = gr.Dropdown(
                     choices=CATEGORIES,
                     value="Query",
                     label="Select Task Category",
                     interactive=True,
                 )
-                prompt_input = gr.Textbox(
-                    placeholder="e.g., Count the total number of boats and describe the environment.",
-                    label="Prompt",
-                    lines=1,
-                )
+                with gr.Row():
+                    prompt_input = gr.Textbox(
+                        placeholder="e.g., Count the total number of boats and describe the environment.",
+                        label="Prompt",
+                        lines=3,
+                    )
+        
                 submit_btn = gr.Button("Process Image", variant="primary")
 
             with gr.Column(scale=2):
                 qwen_img_output = gr.Image(label="Output Image")
                 qwen_text_output = gr.Textbox(
-                    label="Text Output", lines=10, interactive=False, show_copy_button=True
-                )
-
+                    label="Text Output", lines=10, interactive=True)
+                
+                with gr.Row(elem_id="gpu-duration-container"):
+                    with gr.Column():
+                        gr.Markdown("**GPU Duration (seconds)**")
+                        radioanimated_gpu_duration = RadioAnimated(
+                            choices=["60", "90", "120", "180", "240", "300"],
+                            value="60",
+                            elem_id="radioanimated_gpu_duration"
+                        )
+                        gpu_duration_state = gr.Number(value=60, visible=False)
+                
+                gr.Markdown("*Note: Higher GPU duration allows for longer processing but consumes more GPU quota.*")
+            
         gr.Examples(
             examples=[
                 ["examples/5.jpg", "Point", "Detect the children who are out of focus and wearing a white T-shirt."],
@@ -306,6 +436,13 @@ with gr.Blocks(css=css, theme=steel_blue_theme) as demo:
             inputs=[image_input, category_select, prompt_input],
         )
 
+    radioanimated_gpu_duration.change(
+        fn=apply_gpu_duration,
+        inputs=radioanimated_gpu_duration,
+        outputs=[gpu_duration_state],
+        api_visibility="private"
+    )
+
     category_select.change(
         fn=on_category_change,
         inputs=[category_select],
@@ -314,9 +451,9 @@ with gr.Blocks(css=css, theme=steel_blue_theme) as demo:
 
     submit_btn.click(
         fn=process_inputs,
-        inputs=[image_input, category_select, prompt_input],
+        inputs=[image_input, category_select, prompt_input, gpu_duration_state],
         outputs=[qwen_img_output, qwen_text_output],
     )
 
 if __name__ == "__main__":
-    demo.launch(mcp_server=True, ssr_mode=False, show_error=True)
+    demo.launch(css=css, theme=steel_blue_theme, mcp_server=True, ssr_mode=False, show_error=True)
